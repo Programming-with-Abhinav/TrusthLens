@@ -1,0 +1,40 @@
+body {
+    width: 300px;
+    margin: 0;
+    padding: 14px;
+    font: 14px system-ui;
+    background: #0b1220;
+    color: #e8eefc
+}
+
+h3 {
+    margin: 0 0 8px
+}
+
+.mu {
+    color: #8fa0c0;
+    font-size: 12px;
+    word-break: break-all
+}
+
+.chip {
+    display: inline-block;
+    padding: 3px 12px;
+    border-radius: 99px;
+    font-weight: 600;
+    color: #000;
+    margin: 8px 0
+}
+
+.Safe {
+    background: #22c55e
+}
+
+.Dangerous {
+    background: #ef4444
+}
+
+.Suspicious,
+.Caution {
+    background: #f59e0b
+}

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="theme-color" content="#f3f7f5">
+    <meta name="description" content="Check claims and links with TrustLens AI.">
+    <title>TrustLens | Verification Desk</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <header class="topbar">
+        <div class="topbar-inner">
+            <a class="brand" href="/" aria-label="TrustLens home">
+                <span class="brand-mark" aria-hidden="true">T</span>
+                <span class="brand-copy">
+                    <strong>TrustLens</strong>
+                    <small>Verification desk</small>
+                </span>
+            </a>
+            <span class="mode" id="mode" role="status" aria-live="polite">Checking connection</span>
+        </div>
+    </header>
+
+    <main>
+        <div class="page-intro">
+            <p class="eyebrow">Trust, verified</p>
+            <h1>Check a claim or link</h1>
+            <p class="intro-copy">Review a statement against fact checks or scan a link for warning signs.</p>
+        </div>
+
+        <div class="workspace">
+            <section class="card" aria-labelledby="truth-title">
+                <div class="section-heading">
+                    <span class="section-index" aria-hidden="true">01</span>
+                    <div>
+                        <h2 id="truth-title">Check a claim</h2>
+                        <p>Compare a statement with published fact checks.</p>
+                    </div>
+                </div>
+                <form id="verify-form" novalidate>
+                    <label for="t">Claim or statement</label>
+                    <textarea id="t" rows="5" maxlength="2000" placeholder="Paste a news sentence or claim..." autocomplete="off"></textarea>
+                    <div class="field-meta">
+                        <span>Up to 2,000 characters</span>
+                        <output id="claim-count" for="t">0 / 2,000</output>
+                    </div>
+                    <button class="action-button" type="submit">Verify claim</button>
+                </form>
+                <div class="result" id="r1" role="status" aria-live="polite"></div>
+            </section>
+
+            <section class="card" aria-labelledby="safety-title">
+                <div class="section-heading">
+                    <span class="section-index section-index-warm" aria-hidden="true">02</span>
+                    <div>
+                        <h2 id="safety-title">Scan a link</h2>
+                        <p>Check a URL for known threats and suspicious patterns.</p>
+                    </div>
+                </div>
+                <form id="scan-form" novalidate>
+                    <label for="u">Website address</label>
+                    <input id="u" type="text" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" placeholder="example.com or https://example.com">
+                    <p class="field-help">A missing https:// prefix is okay.</p>
+                    <button class="action-button action-button-warm" type="submit">Scan link</button>
+                </form>
+                <div class="result" id="r2" role="status" aria-live="polite"></div>
+            </section>
+
+            <section class="card audit-card" aria-labelledby="history-title">
+                <div class="section-heading audit-heading">
+                    <span class="section-index section-index-neutral" aria-hidden="true">03</span>
+                    <div>
+                        <h2 id="history-title">Recent checks</h2>
+                        <p>Latest activity from this session.</p>
+                    </div>
+                </div>
+                <div id="h" aria-live="polite"><p class="empty-state">Your recent checks will appear here.</p></div>
+            </section>
+        </div>
+        <footer class="page-footer">TrustLens provides signals to support your judgment, not a guarantee of safety.</footer>
+    </main>
+
+    <script src="app.js"></script>
+    <script src="interactions.js"></script>
+</body>
+
+</html>

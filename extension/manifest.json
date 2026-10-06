@@ -1,0 +1,26 @@
+{
+    "manifest_version": 3,
+    "name": "TrustLens AI",
+    "version": "0.2",
+    "description": "Fact-check selected text and scan the current link.",
+    "permissions": [
+        "activeTab"
+    ],
+    "host_permissions": [
+        "http://localhost:8000/*"
+    ],
+    "action": {
+        "default_popup": "popup.html",
+        "default_title": "TrustLens AI"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
+                "content.js"
+            ]
+        }
+    ]
+}
