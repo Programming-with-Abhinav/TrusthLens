@@ -1,0 +1,30 @@
+# Roo Code & Cline Project Rules: TrustLens AI
+
+## Project Overview
+TrustLens AI is a dual-tier web verification system providing browser-based factual claim verification (Truth Engine) and heuristic malicious URL scanning (Safety Engine).
+
+## Tech Stack
+- **Backend**: FastAPI (Python 3.14), Uvicorn, SQLite (`db.py`), Supabase REST client (`supabase_client.py`).
+- **Frontend**: Next.js 16 (App Router), React 19, TailwindCSS, Supabase SSR Auth.
+- **Browser Extension**: Chrome Manifest V3 (`extension/`), content script with closed Shadow DOM, popup UI.
+- **Testing**: `pytest` (`test_main.py`).
+
+## Critical Architectural & Security Rules
+1. **No `innerHTML` in Extension or Static Frontend**:
+   - `content.js`, `popup.js`, and `app.js` must strictly use `document.createElement` and `textContent`.
+   - Never use string interpolation into HTML sinks to prevent XSS.
+2. **Shadow DOM Boundary**:
+   - Extension overlay is mounted inside `attachShadow({ mode: "closed" })` so host webpage CSS cannot tamper with TrustLens elements.
+3. **Route Protection**:
+   - Always gate protected Next.js routes with `supabase.auth.getUser()`. Never use unverified `getSession()`.
+4. **Open Redirect Defenses**:
+   - Any redirect query parameter (e.g. `?next=`) must be validated with `getSafeRedirectUrl()` to enforce same-site relative paths.
+5. **Privacy Protection**:
+   - Never log raw claims, full URLs, or personal browsing history to disk or stdout.
+6. **API Versioning**:
+   - All `/api/verify` and `/api/scan` endpoints have backward-compatible aliases at `/api/v1/verify/claim` and `/api/v1/scan/url`.
+
+## Verification & Commands
+- **Run Backend Tests**: `.venv\Scripts\python.exe -m pytest test_main.py -v`
+- **Build Next.js Frontend**: `cmd.exe /c npm run build` (inside `my-vibe-app/`)
+- **Run FastAPI Locally**: `.venv\Scripts\python.exe -m uvicorn main:app --reload --port 5500`

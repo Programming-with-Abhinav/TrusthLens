@@ -1,0 +1,15 @@
+.env*
+!.env.example
+.venv/
+.venv*
+*.db
+.git/
+.gitignore
+node_modules/
+.next/
+__pycache__/
+.pytest_cache/
+*.pyc
+.vscode/
+planning/
+PLANNING_README.md

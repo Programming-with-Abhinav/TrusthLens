@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TrustLens AI – Privacy Policy</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #090d16;
+      color: #f8fafc;
+      line-height: 1.6;
+      padding: 40px 20px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    h1 { color: #38bdf8; margin-bottom: 8px; font-size: 28px; }
+    h2 { color: #ffffff; margin-top: 28px; margin-bottom: 12px; font-size: 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 6px; }
+    p, li { color: #94a3b8; font-size: 15px; margin-bottom: 12px; }
+    ul { margin-left: 24px; margin-bottom: 16px; }
+    strong { color: #f8fafc; }
+    .highlight { background: rgba(56, 189, 248, 0.08); border-left: 3px solid #38bdf8; padding: 12px 16px; border-radius: 4px; margin: 20px 0; }
+  </style>
+</head>
+<body>
+  <h1>TrustLens AI Privacy Policy</h1>
+  <p><strong>Effective Date:</strong> October 2026 · <strong>Version:</strong> 1.3.0</p>
+
+  <div class="highlight">
+    <strong>Zero-Tracking Core Commitment:</strong> TrustLens AI does not track, record, or sell your web browsing history. We believe security and truth verification should never require sacrificing personal privacy.
+  </div>
+
+  <h2>1. Information We Collect and Process</h2>
+  <ul>
+    <li><strong>Selected Text for Verification:</strong> When you select 4 or more words on a webpage, that snippet is sent to the TrustLens verification gateway to retrieve fact-checking sources. We do not link this text to your identity or store it permanently.</li>
+    <li><strong>Active Tab URL:</strong> When you open the TrustLens popup to scan a page, the current tab URL is inspected for phishing patterns, crypto-drainers, and known threats. We log only aggregate anonymized safety levels (e.g. "Safe", "Dangerous").</li>
+    <li><strong>User-Requested Summaries:</strong> When you click “Summarize page,” visible article text (or selected text) and its URL are sent to your configured TrustLens backend. Raw page text is not saved; only a hash-keyed summary cache entry and a generic summary activity record are stored.</li>
+    <li><strong>Account Information (Optional):</strong> If you create an account to view your dashboard, we store your email address and aggregate daily counters (e.g., 5 claims checked today). We never store which claims you checked.</li>
+  </ul>
+
+  <h2>2. Permissions Justification</h2>
+  <ul>
+    <li><code>activeTab</code>: Required strictly to read the URL of the tab when the user clicks the extension icon to perform a security scan.</li>
+    <li><code>storage</code>: Used strictly to save your preferred backend URL and your optional Supabase authentication token across browser sessions.</li>
+    <li><code>clipboardWrite</code>: Used only after you click “Copy summary” to copy the generated summary.</li>
+  </ul>
+
+  <h2>3. Third-Party Services</h2>
+  <p>To provide factual verdicts and threat intelligence, TrustLens queries:</p>
+  <ul>
+    <li>Google Fact Check Tools API (retrieves public ClaimReview records)</li>
+    <li>Google Web Risk API (identifies known malware and social engineering links)</li>
+    <li>Supabase (manages user authentication and daily quota counting)</li>
+  </ul>
+
+  <h2>4. Data Deletion and Control</h2>
+  <p>You can delete your account and all associated usage records at any time directly through the TrustLens Web Dashboard. Account deletion immediately cascades across all databases.</p>
+
+  <h2>5. Contact & Inquiries</h2>
+  <p>For questions or privacy concerns, please open an issue on the TrustLens GitHub repository or visit <a href="https://trustlens.ai" style="color: #38bdf8;">trustlens.ai</a>.</p>
+</body>
+</html>

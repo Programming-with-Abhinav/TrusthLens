@@ -1,0 +1,68 @@
+# CodeRabbit Configuration for TrustLens AI
+# Documentation: https://docs.coderabbit.ai/guides/configure-coderabbit
+
+version: "2"
+language: "en-US"
+
+early_access: false
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "main"
+      - "master"
+      - "develop"
+
+  # Path filters - ignore build output, virtual environments, databases, and third-party vendor files
+  path_filters:
+    - "!**/.git/**"
+    - "!**/.venv/**"
+    - "!**/__pycache__/**"
+    - "!**/.pytest_cache/**"
+    - "!**/my-vibe-app/.next/**"
+    - "!**/my-vibe-app/node_modules/**"
+    - "!**/node_modules/**"
+    - "!**/*.db"
+    - "!**/*.crx"
+    - "!**/*.pem"
+    - "!**/.agents/**"
+    - "!**/.planning/**"
+
+  # Custom instructions for TrustLens AI architectural rules and standards
+  path_instructions:
+    - path: "extension/**"
+      instructions: |
+        - CRITICAL SECURITY: Never allow `innerHTML` or string-to-HTML interpolation.
+        - All DOM mutations must use safe APIs: `document.createElement`, `textContent`, `setAttribute`.
+        - The overlay must be isolated in a closed Shadow DOM (`attachShadow({ mode: 'closed' })`) to prevent host page CSS collisions.
+        - Ensure manifest permissions follow the principle of least privilege (`activeTab`, `storage`).
+
+    - path: "my-vibe-app/**"
+      instructions: |
+        - Server-side route protection must use `supabase.auth.getUser()`, NEVER unverified `getSession()`.
+        - Open redirect defense: All redirect targets (e.g. `?next=`) must be validated using `getSafeRedirectUrl` (must be same-site relative, no `//` or external schemes).
+        - Authentication error messages must be generic to prevent email enumeration attacks.
+        - Ensure client bundles never import or reference `SUPABASE_SERVICE_ROLE_KEY`.
+
+    - path: "main.py"
+      instructions: |
+        - Maintain backward compatibility for both `/api/...` and `/api/v1/...` routes.
+        - Ensure structured logging never writes raw user claims or visited URLs to stdout/logs to preserve privacy.
+        - Never call Google Web Risk API without checking that `GOOGLE_WEB_RISK_API_KEY` is present.
+        - Any malformed URL must return HTTP 400 with a clear error message.
+
+    - path: "test_*.py"
+      instructions: |
+        - Ensure any new endpoint or route behavior is covered by a test in pytest.
+        - Validate both authenticated and anonymous paths.
+
+chat:
+  auto_reply: true

@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>TrustLens AI</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <h3>🛡️ TrustLens AI</h3>
+    <a href="#" id="open-options" title="Settings">⚙️ Settings</a>
+  </div>
+  <p class="mu">Active Tab URL Safety</p>
+  <div id="url" class="mu url-display"></div>
+  <div id="out">Scanning active page…</div>
+  <section class="summary-tools" aria-labelledby="summary-title">
+    <h4 id="summary-title">Summarize this page</h4>
+    <label for="summary-length">Length</label>
+    <select id="summary-length">
+      <option value="short">Short</option>
+      <option value="medium">Medium</option>
+    </select>
+    <button id="summarize-page" type="button">Summarize page</button>
+    <div id="summary-output" role="status" aria-live="polite"></div>
+  </section>
+  <div class="footer-tip">
+    Tip: Select any sentence on a webpage to verify claims live.
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
