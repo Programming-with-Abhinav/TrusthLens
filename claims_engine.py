@@ -1,8 +1,8 @@
-"""TrustLens AI - Advanced Truth Engine (Phase 2).
+"""TrustLens AI - Truth Engine.
 Implements:
-- FR-C7: Semantic Hybrid Retrieval (BM25 + Dense Vector Cosine Similarity) over ClaimReview records
-- FR-C8: NLI Stance Classification & Composite Trust Scoring (with temporal decay & source weights)
-- FR-C9: Grounded Evidence Synthesis (Gemini API with sanitization & fallback)
+- FR-C7: Keyword and frequency retrieval over ClaimReview records (demo only)
+- FR-C8: Review rating stance mapping & source authority weighting
+- FR-C9: Grounded Evidence Synthesis (Gemini API with sanitization & deterministic fallback)
 """
 import os
 import re
@@ -220,10 +220,8 @@ class SemanticTruthEngine:
 # Global singleton
 TRUTH_ENGINE = SemanticTruthEngine()
 
-def classify_nli_stance(claim_text: str, evidence_text: str, rating_verdict: str) -> str:
-    """NLI Stance Classification (Supports, Refutes, Neutral/Mixed).
-    FR-C8 requirement.
-    """
+def derive_stance_from_rating(claim_text: str, evidence_text: str, rating_verdict: str) -> str:
+    """Derives stance (Supports, Refutes, Neutral) from rating verdict and evidence text patterns (FR-C8)."""
     e_lower = evidence_text.lower()
     r_lower = rating_verdict.lower()
 
@@ -238,6 +236,8 @@ def classify_nli_stance(claim_text: str, evidence_text: str, rating_verdict: str
     elif re.search(r"confirms|valid|consistent|proves", e_lower):
         return "Supports"
     return "Neutral"
+
+classify_nli_stance = derive_stance_from_rating
 
 def compute_temporal_decay(published_date_str: Optional[str]) -> float:
     """Computes temporal decay factor: older evidence decays slightly in recency weight."""
@@ -312,14 +312,15 @@ async def synthesize_grounded_explanation(
     # If Gemini API key is available, generate grounded explanation
     if gemini_key:
         try:
-            # Input sanitization against prompt injection
-            sanitized_claim = re.sub(r"[\n\r\"']", " ", claim)[:200]
+            # Input sanitization against control characters and prompt injection
+            clean_claim = re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", claim)
+            sanitized_claim = re.sub(r"[\n\r\"']", " ", clean_claim)[:200]
             prompt = (
                 "You are TrustLens AI, a factual verification engine. Provide a concise explanation of the verdict "
                 "using only the provided evidence, and for a false or misleading claim state the accurate fact "
                 "that the evidence supports. Include the publisher name. If the evidence does not establish a "
                 "correction, say so and direct the reader to the cited review; do not invent facts.\n\n"
-                f"Claim: {sanitized_claim}\n"
+                f"Claim: <<< {sanitized_claim} >>>\n"
                 f"Verdict: {verdict} (Stance: {stance})\n"
                 f"Evidence:\n{context_str}\n\nSynthesis:"
             )
@@ -328,13 +329,14 @@ async def synthesize_grounded_explanation(
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}"
                 payload: Dict[str, Any] = {
                     "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0.1, "maxOutputTokens": 100}
+                    "generationConfig": {"temperature": 0.1, "maxOutputTokens": 256}
                 }
                 res = await client.post(url, json=payload)
                 if res.status_code == 200:
                     cand = res.json().get("candidates", [])
                     if cand and cand[0].get("content", {}).get("parts"):
-                        return cand[0]["content"]["parts"][0]["text"].strip()
+                        text = cand[0]["content"]["parts"][0]["text"].strip()
+                        return text[:400]
         except Exception:
             pass
 

@@ -5,6 +5,7 @@ Complies with TrustLens_PRD_v1.1 functional requirements:
 - Phase 3: FR-U6 (Domain age & SSL), FR-U7 (Crypto drainers), FR-U8 (Blocking interstitial)
 """
 import os
+import asyncio
 import re
 import time
 import hashlib
@@ -160,10 +161,46 @@ def check_ip_rate_limit(ip: str, cap: int = 30, per: int = 60) -> bool:
     return True
 
 def split_claims(text: str) -> List[str]:
-    """Atomic claim extraction: splits into max 5 sentence claims (FR-C2)."""
-    parts = re.split(r"(?<=[.!?])\s+", text.strip())
-    extracted = [p.strip() for p in parts if len(p.split()) >= 4]
-    return extracted[:5] if extracted else [text.strip()[:200]]
+    """Atomic claim extraction: splits into max 5 sentence claims with abbreviation protection (FR-C2)."""
+    cleaned = text.strip()
+    if not cleaned:
+        return []
+
+    # Protect abbreviations and decimals from split
+    protected = re.sub(r"\b(Dr|Mr|Mrs|Ms|Prof|U\.S|e\.g|i\.e|vs)\.", r"\1<DOT>", cleaned)
+    protected = re.sub(r"(\d)\.(\d)", r"\1<DEC>\2", protected)
+
+    parts = re.split(r"(?<=[.!?])\s+", protected)
+    extracted: List[str] = []
+    for p in parts:
+        restored = p.replace("<DOT>", ".").replace("<DEC>", ".").strip()
+        if len(restored.split()) >= 3:
+            extracted.append(restored)
+
+    return extracted[:5] if extracted else [cleaned[:200]]
+
+RATING_MAP: Dict[str, str] = {
+    # True / Verified
+    "true": "True", "correct": "True", "accurate": "True", "verified": "True",
+    "confirmed": "True", "fact": "True", "real": "True", "authentic": "True",
+    # Mostly true
+    "mostly true": "MostlyTrue", "mostly accurate": "MostlyTrue", "largely true": "MostlyTrue",
+    # Mixed / Partial
+    "mixed": "Mixed", "half true": "Mixed", "partly true": "Mixed", "partially true": "Mixed",
+    "somewhat true": "Mixed", "needs context": "Mixed", "missing context": "Mixed",
+    "lacks context": "Mixed", "exaggerated": "Mixed", "in-between": "Mixed", "ambiguous": "Mixed",
+    # Misleading
+    "misleading": "Misleading", "distorts facts": "Misleading", "out of context": "Misleading",
+    "unsupported": "Misleading", "misattributed": "Misleading", "manipulated": "Misleading",
+    # False
+    "false": "False", "fake": "False", "incorrect": "False", "inaccurate": "False",
+    "not true": "False", "untrue": "False", "debunked": "False", "hoax": "False",
+    "pants on fire": "False", "four pinocchios": "False", "wrong": "False",
+    "no evidence": "False", "scam": "False", "satire": "False", "unproven": "False",
+    "outdated": "False", "barely true": "False", "mostly false": "False",
+    "half false": "False", "partly false": "False", "not accurate": "False",
+    "unfounded": "False", "fabricated": "False", "refuted": "False"
+}
 
 def map_verdict(rating_str: str) -> str:
     """Map a claim-review rating to a trusted verdict while handling negation and partial truths."""
@@ -171,17 +208,23 @@ def map_verdict(rating_str: str) -> str:
     if not r:
         return "Unrated"
 
+    if r in RATING_MAP:
+        return RATING_MAP[r]
+
     if re.search(
-        r"not true|inaccurate|incorrect|false|fake|misleading|pants|hoax|no evidence|wrong|scam|untrue|debunked|mostly false|half false|partly false",
+        r"\b(not true|inaccurate|incorrect|false|fake|pants on fire|hoax|no evidence|wrong|scam|untrue|debunked|mostly false|half false|partly false|barely true|not accurate|unproven|satire|fabricated)\b",
         r,
     ):
         return "False"
 
-    if re.search(r"mixed|partly true|half true|mostly true|somewhat true|ambiguous", r):
+    if re.search(r"\b(mixed|partly true|half true|mostly true|somewhat true|ambiguous|needs context|missing context|lacks context)\b", r):
         return "Mixed"
 
-    if re.search(r"true|correct|accurate|legit|confirmed|verified", r):
+    if re.search(r"\b(true|correct|accurate|legit|confirmed|verified|fact)\b", r):
         return "True"
+
+    if re.search(r"\b(misleading|distorts|out of context|unsupported|manipulated)\b", r):
+        return "Misleading"
 
     return "Unrated"
 
@@ -326,9 +369,14 @@ async def verify_single_claim(claim_text: str) -> Dict[str, Any]:
                             "verdict": v
                         })
                 if votes:
-                    top_verdict = max(set(votes), key=votes.count)
-                    result["verdict"] = top_verdict
-                    result["confidence"] = round(votes.count(top_verdict) / len(votes), 2)
+                    has_true = any(v in ("True", "MostlyTrue") for v in votes)
+                    has_false = any(v in ("False", "Misleading") for v in votes)
+                    if has_true and has_false:
+                        result["verdict"] = "Mixed"
+                    else:
+                        top_verdict = max(set(votes), key=votes.count)
+                        result["verdict"] = top_verdict
+                    result["confidence"] = round(votes.count(result["verdict"]) / len(votes), 2)
                     result["source"] = "google"
         except Exception as e:
             logger.warning("Google Fact Check API query error: %s", type(e).__name__)
@@ -411,7 +459,7 @@ async def verify_claims(
             user, num_claims=len(claims_list)
         )
 
-    verified_claims = [await verify_single_claim(c) for c in claims_list]
+    verified_claims = list(await asyncio.gather(*(verify_single_claim(c) for c in claims_list)))
 
     elapsed = round((time.time() - start_time) * 1000, 1)
     logger.info(f"Verify completed in {elapsed}ms | user_auth={bool(user)} | claims_count={len(verified_claims)}")
