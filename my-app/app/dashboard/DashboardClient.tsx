@@ -18,7 +18,8 @@ import {
   Key,
 } from 'lucide-react';
 import { signoutAction, deleteAccountAction, updateDisplayNameAction } from '@/app/auth/actions';
-import { createClient } from '@/lib/supabase/client';
+import { createClient } from '@/lib/supabase/client';
+import { ClaimItem, ClaimSource, ScanResponse, VerifyResponse } from '@/lib/types';
 
 interface DashboardProps {
   user: {
@@ -35,30 +36,8 @@ interface DashboardProps {
     url_scans: number;
     day: string;
   };
-}
-
-interface ClaimSource {
-  publisher: string;
-  rating?: string;
-  url?: string;
-  verdict?: string;
-}
-
-interface ClaimItem {
-  claim: string;
-  verdict: string;
-  sources?: ClaimSource[];
-  synthesis?: string;
-}
-
-interface UrlScanResult {
-  url: string;
-  level: string;
-  flags?: string[];
-  threats?: string[];
-  source?: string;
-}
-
+}
+
 export default function DashboardClient({ user, profile, initialUsage }: DashboardProps) {
   const [displayName, setDisplayName] = useState(profile.display_name || '');
   const [isEditingName, setIsEditingName] = useState(false);
@@ -80,7 +59,7 @@ export default function DashboardClient({ user, profile, initialUsage }: Dashboa
   // URL Scan Widget State
   const [urlInput, setUrlInput] = useState('');
   const [urlLoading, setUrlLoading] = useState(false);
-  const [urlResult, setUrlResult] = useState<UrlScanResult | null>(null);
+  const [urlResult, setUrlResult] = useState<ScanResponse | null>(null);
   const [urlError, setUrlError] = useState<string | null>(null);
 
   // Fetch access token on client
@@ -149,7 +128,7 @@ export default function DashboardClient({ user, profile, initialUsage }: Dashboa
         throw new Error(errorData.detail || `Request failed with status ${res.status}`);
       }
 
-      const data = await res.json();
+      const data = (await res.json()) as VerifyResponse;
       setClaimResults(data.claims || []);
       // Update local counter
       setUsage((prev) => ({ ...prev, claim_checks: prev.claim_checks + (data.claims?.length || 1) }));
@@ -185,7 +164,7 @@ export default function DashboardClient({ user, profile, initialUsage }: Dashboa
         throw new Error(errorData.detail || `Request failed with status ${res.status}`);
       }
 
-      const data = await res.json();
+      const data = (await res.json()) as ScanResponse;
       setUrlResult(data);
       // Update local counter
       setUsage((prev) => ({ ...prev, url_scans: prev.url_scans + 1 }));

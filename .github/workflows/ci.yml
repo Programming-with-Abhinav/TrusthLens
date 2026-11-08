@@ -41,14 +41,14 @@ jobs:
         with:
           node-version: 20
           cache: "npm"
-          cache-dependency-path: my-vibe-app/package.json
+          cache-dependency-path: my-app/package.json
 
       - name: Install Frontend Dependencies
-        working-directory: my-vibe-app
+        working-directory: my-app
         run: npm ci
 
       - name: Build Next.js Web App
-        working-directory: my-vibe-app
+        working-directory: my-app
         run: npm run build
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co

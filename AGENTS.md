@@ -68,7 +68,7 @@ You are working on TrustLens AI: FastAPI API + Next.js 16 website (Supabase auth
 .venv\Scripts\python.exe -m ruff check .                    # lint (after Phase 8 setup)
 .venv\Scripts\python.exe scripts\guardrails.py              # project guardrail scan
 .venv\Scripts\python.exe -m uvicorn main:app --reload --port 5500
-cd my-vibe-app; npm ci; npm run build; npm run lint
+cd my-app; npm ci; npm run build; npm run lint
 .\scripts\verify.ps1                                        # runs all of the above
 ```
 

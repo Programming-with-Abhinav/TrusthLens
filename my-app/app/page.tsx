@@ -10,66 +10,17 @@ import {
   Lock,
   Sparkles,
   Zap,
-} from 'lucide-react';
-
-interface ClaimSource {
-  publisher: string;
-  title?: string;
-  rating?: string;
-  url?: string;
-  verdict?: string;
-}
+} from 'lucide-react';
+import { ClaimItem, ScanResponse, VerifyResponse } from '@/lib/types';
 
-interface ClaimResult {
-  claim: string;
-  verdict: string;
-  confidence?: number;
-  sources?: ClaimSource[];
-  synthesis?: string;
-}
-
-interface UrlScanResult {
-  url: string;
-  level: string;
-  flags?: string[];
-  flag_explanations?: Record<string, string>;
-  should_block?: boolean;
-  source?: string;
-}
-
-interface ClaimSource {
-  publisher: string;
-  title?: string;
-  rating?: string;
-  url?: string;
-  verdict?: string;
-}
-
-interface ClaimResult {
-  claim: string;
-  verdict: string;
-  confidence?: number;
-  sources?: ClaimSource[];
-  synthesis?: string;
-}
-
-interface UrlScanResult {
-  url: string;
-  level: string;
-  flags?: string[];
-  flag_explanations?: Record<string, string>;
-  should_block?: boolean;
-  source?: string;
-}
-
 export default function HomePage() {
   const [claimText, setClaimText] = useState('5G networks cause respiratory viruses');
   const [claimLoading, setClaimLoading] = useState(false);
-  const [claimResult, setClaimResult] = useState<ClaimResult | null>(null);
+  const [claimResult, setClaimResult] = useState<ClaimItem | null>(null);
 
   const [urlText, setUrlText] = useState('http://paypal-security-login.xyz/claim');
   const [urlLoading, setUrlLoading] = useState(false);
-  const [urlResult, setUrlResult] = useState<UrlScanResult | null>(null);
+  const [urlResult, setUrlResult] = useState<ScanResponse | null>(null);
 
   const handleQuickClaimCheck = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,7 +34,7 @@ export default function HomePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: claimText }),
       });
-      const data = await res.json();
+      const data = (await res.json()) as VerifyResponse;
       setClaimResult(data.claims?.[0] || null);
     } catch {
       // Mock result if backend is unavailable on port 5500
@@ -116,7 +67,7 @@ export default function HomePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: urlText }),
       });
-      const data = await res.json();
+      const data = (await res.json()) as ScanResponse;
       setUrlResult(data);
     } catch {
       // Demo preview if backend not currently running

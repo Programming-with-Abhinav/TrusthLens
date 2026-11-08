@@ -681,8 +681,13 @@ def test_score_table():
     assert dangerous_resp.json()["level"] == "Dangerous"
 
 
-def test_concurrent_scans_do_not_block():
+def test_concurrent_scans_do_not_block(monkeypatch):
     import time
+
+    async def mock_advanced(url: str, flags: list[str]):
+        return [], {"domain_age_days": 1000, "ssl_valid": True, "should_block": False}
+
+    monkeypatch.setattr(main.url_scanner, "evaluate_advanced_threats", mock_advanced)
     urls = [
         f"https://example{i}.org/page" for i in range(10)
     ]
