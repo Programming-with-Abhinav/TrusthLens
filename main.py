@@ -19,6 +19,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, Request, HTTPException, Header, APIRouter
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse, Response
 from collections.abc import Awaitable, Callable
 import uuid
@@ -369,15 +371,25 @@ async def health() -> Dict[str, Any]:
     }
 
 
+_READINESS_CACHE: Dict[str, Any] = {"checked_at": 0.0, "ok": True}
+
+
 async def readiness() -> Dict[str, Any] | JSONResponse:
     env_name = (os.getenv("ENV", "development") or "development").lower()
+    now = time.time()
     if env_name == "production":
         try:
             validate_runtime_config()
         except RuntimeError as exc:
             return JSONResponse(status_code=503, content={"status": "not_ready", "error": str(exc)})
 
-        supabase_ok = await supabase_client.ping_supabase()
+        if now - _READINESS_CACHE.get("checked_at", 0.0) > 30.0:
+            supabase_ok = await supabase_client.ping_supabase()
+            _READINESS_CACHE["checked_at"] = now
+            _READINESS_CACHE["ok"] = bool(supabase_ok)
+        else:
+            supabase_ok = _READINESS_CACHE.get("ok", True)
+
         if not supabase_ok:
             return JSONResponse(status_code=503, content={"status": "not_ready", "database": "unavailable"})
 
@@ -639,19 +651,37 @@ def create_app() -> FastAPI:
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
+        request.state.request_id = request_id
+        client_ip = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "127.0.0.1")
+        request.state.client_ip = client_ip
+
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
+
+        # Security headers (API-07, SEC-07, SEC-08)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+
+        # Authenticated requests must never be cached by shared or client caches
+        if "authorization" in request.headers:
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+
+        # Deprecation notice for legacy routes
         if request.url.path.startswith("/api/") and not request.url.path.startswith("/api/v1/"):
             response.headers["Deprecation"] = "true"
         return response
 
-    @application.exception_handler(HTTPException)
-    async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
-        request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
+    @application.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        request_id = request.headers.get("x-request-id") or getattr(request.state, "request_id", str(uuid.uuid4()))
         detail = exc.detail
+        headers = {"X-Request-ID": request_id, **(exc.headers or {})}
+        headers["X-Content-Type-Options"] = "nosniff"
+        headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         return JSONResponse(
             status_code=exc.status_code,
-            headers={"X-Request-ID": request_id, **(exc.headers or {})},
+            headers=headers,
             content={
                 "error": {
                     "code": exc.status_code,
@@ -661,10 +691,52 @@ def create_app() -> FastAPI:
             },
         )
 
+    @application.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+        request_id = request.headers.get("x-request-id") or getattr(request.state, "request_id", str(uuid.uuid4()))
+        headers = {
+            "X-Request-ID": request_id,
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+        }
+        return JSONResponse(
+            status_code=422,
+            headers=headers,
+            content={
+                "error": {
+                    "code": 422,
+                    "message": "Invalid request payload.",
+                    "details": exc.errors(),
+                    "request_id": request_id,
+                }
+            },
+        )
+
+    @application.exception_handler(Exception)
+    async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        request_id = request.headers.get("x-request-id") or getattr(request.state, "request_id", str(uuid.uuid4()))
+        logger.exception("Unhandled server error: %s (request_id=%s)", type(exc).__name__, request_id)
+        headers = {
+            "X-Request-ID": request_id,
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+        }
+        return JSONResponse(
+            status_code=500,
+            headers=headers,
+            content={
+                "error": {
+                    "code": 500,
+                    "message": "An internal server error occurred.",
+                    "request_id": request_id,
+                }
+            },
+        )
+
     # Root system probes and utilities
     @application.get("/healthz")
     async def _healthz() -> Dict[str, Any]:
-        return await health()
+        return {"status": "ok", "service": "trustlens-api"}
 
     @application.get("/readyz", response_model=None)
     async def _readyz() -> Dict[str, Any] | JSONResponse:

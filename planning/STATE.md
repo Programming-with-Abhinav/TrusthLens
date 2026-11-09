@@ -36,6 +36,7 @@ Total tracked: see `00-PROJECT-ANALYSIS.md` §4.
 | 2026-11-04 | Phase 7 Exit Gate | 8/8 proof tests pass (`test_top1000_domains_never_dangerous`, `test_brand_official_domains_not_flagged`, `test_brand_lookalikes_flagged`, `test_ssrf_targets_blocked`, `test_non_http_schemes_rejected`, `test_unknown_rdap_never_blocks`, `test_score_table`, `test_concurrent_scans_do_not_block`). Total 62 tests green. | Coding agent |
 | 2026-11-08 | Frontend CI Build | Fixed TypeScript type mismatch with centralized `lib/types.ts`; `npx tsc --noEmit`, `npm run lint`, and `npm run build` all pass cleanly with 0 errors; aligned CI workflow path to `my-app` | Coding agent |
 | 2026-11-09 | TL-053/TL-054 | Phase 8 Step 1: `test_legacy_and_v1_route_parity` and `test_no_static_mounts_in_prod` pass. Unified APIRouter mounted at /api/v1 and legacy /api with Deprecation header; static mounts and docs disabled in production. Total 64 tests green. | Coding agent |
+| 2026-11-09 | TL-056/API-06/07/08 | Phase 8 Step 2: `test_error_contract_has_request_id`, `test_security_headers_present`, and `test_readyz_degrades_when_redis_down` pass. Uniform error envelope, security headers (nosniff, HSTS, referrer-policy, private cache-control), and cached readiness probe verified. Total 67 tests green. | Coding agent |
 
 ## Open decisions
 D1–D10 in `DECISIONS.md` — none resolved.

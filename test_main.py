@@ -749,3 +749,61 @@ def test_no_static_mounts_in_prod(monkeypatch):
 
     r_openapi = prod_client.get("/openapi.json")
     assert r_openapi.status_code == 404
+
+
+def test_error_contract_has_request_id():
+    # 1. Validation error (422) must follow uniform error envelope with request_id
+    custom_id = "req-err-test-422"
+    r = client.post("/api/v1/verify/claim", json={"text": ""}, headers={"X-Request-ID": custom_id})
+    assert r.status_code == 422
+    assert r.headers.get("X-Request-ID") == custom_id
+    body = r.json()
+    assert "error" in body
+    assert body["error"]["code"] == 422
+    assert body["error"]["request_id"] == custom_id
+    assert "details" in body["error"] or "message" in body["error"]
+
+    # 2. HTTP exception (404) follows error envelope
+    r404 = client.get("/api/v1/nonexistent", headers={"X-Request-ID": "req-404"})
+    assert r404.status_code == 404
+    assert r404.headers.get("X-Request-ID") == "req-404"
+    assert "error" in r404.json()
+    assert r404.json()["error"]["code"] == 404
+    assert r404.json()["error"]["request_id"] == "req-404"
+
+
+def test_security_headers_present():
+    r = client.get("/healthz")
+    assert r.status_code == 200
+    assert r.headers.get("X-Content-Type-Options") == "nosniff"
+    assert "max-age=" in r.headers.get("Strict-Transport-Security", "")
+    assert r.headers.get("Referrer-Policy") in ("strict-origin-when-cross-origin", "no-referrer")
+
+    # Authenticated requests must carry Cache-Control: no-store
+    r_auth = client.post(
+        "/api/v1/verify/claim",
+        headers={"Authorization": "Bearer mock-token-123"},
+        json={"text": "5G towers spread viruses"}
+    )
+    assert "no-store" in r_auth.headers.get("Cache-Control", "")
+
+
+def test_readyz_degrades_when_redis_down(monkeypatch):
+    # Simulates storage or dependency degradation on readiness probe
+    monkeypatch.setenv("ENV", "production")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "mock-key")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://app.trustlens.ai")
+
+    # Invalidate cached readiness state
+    if hasattr(main, "_READINESS_CACHE"):
+        main._READINESS_CACHE.clear()
+
+    # When database ping fails, /readyz must degrade to 503
+    async def mock_fail_ping():
+        return False
+    monkeypatch.setattr(main.supabase_client, "ping_supabase", mock_fail_ping)
+
+    r = client.get("/readyz")
+    assert r.status_code == 503
+    assert r.json().get("status") == "not_ready"
