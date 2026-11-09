@@ -18,7 +18,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, Request, HTTPException, Header
+from fastapi import FastAPI, Request, HTTPException, Header, APIRouter
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse, Response
 from collections.abc import Awaitable, Callable
 import uuid
@@ -68,13 +70,6 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(
-    title="TrustLens AI API",
-    description="Browser-based factual claim verification and malicious URL scanner API",
-    version="1.1.0",
-    lifespan=lifespan,
-)
-
 allowed_origins = get_allowed_origins()
 
 
@@ -96,41 +91,11 @@ def validate_runtime_config() -> None:
         missing = ", ".join(required)
         raise RuntimeError(f"production config missing required values: {missing}")
 
-@app.middleware("http")
-async def add_request_id(
-    request: Request,
-    call_next: Callable[[Request], Awaitable[Response]],
-) -> Response:
-    request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    return response
-
-
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
-    request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
-    detail = exc.detail
-    return JSONResponse(
-        status_code=exc.status_code,
-        headers={"X-Request-ID": request_id, **(exc.headers or {})},
-        content={
-            "error": {
-                "code": exc.status_code,
-                "message": detail,
-                "request_id": request_id,
-            }
-        },
-    )
-
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=False,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "Content-Type", "Accept-Profile", "Content-Profile"],
-)
+# Free-tier daily budget guards (Task 8.15 / TL-050): protect upstream API quotas
+# Google Fact Check free tier: ~10,000 requests/day
+DAILY_FREE_CLAIM_LIMIT: int = int(os.getenv("DAILY_FREE_CLAIM_LIMIT", "50"))
+DAILY_FREE_SCAN_LIMIT: int = int(os.getenv("DAILY_FREE_SCAN_LIMIT", "50"))
+DAILY_FREE_SUMMARY_LIMIT: int = int(os.getenv("DAILY_FREE_SUMMARY_LIMIT", "20"))
 
 # In-memory IP rate limiter for anonymous access
 RATE_LIMIT_BUCKET: Dict[str, list[float]] = {}
@@ -396,9 +361,10 @@ async def verify_single_claim(claim_text: str) -> Dict[str, Any]:
     return result
 
 # --- Health Endpoint (FR-P1) ---
-@app.get("/healthz")
-@app.get("/api/health")
-@app.get("/api/v1/health")
+
+
+api_router = APIRouter()
+@api_router.get("/health")
 async def health() -> Dict[str, Any]:
     supabase_ok = await supabase_client.ping_supabase()
     return {
@@ -411,24 +377,33 @@ async def health() -> Dict[str, Any]:
     }
 
 
-@app.get("/readyz", response_model=None)
+_READINESS_CACHE: Dict[str, Any] = {"checked_at": 0.0, "ok": True}
+
+
 async def readiness() -> Dict[str, Any] | JSONResponse:
     env_name = (os.getenv("ENV", "development") or "development").lower()
+    now = time.time()
     if env_name == "production":
         try:
             validate_runtime_config()
         except RuntimeError as exc:
             return JSONResponse(status_code=503, content={"status": "not_ready", "error": str(exc)})
 
-        supabase_ok = await supabase_client.ping_supabase()
+        if now - _READINESS_CACHE.get("checked_at", 0.0) > 30.0:
+            supabase_ok = await supabase_client.ping_supabase()
+            _READINESS_CACHE["checked_at"] = now
+            _READINESS_CACHE["ok"] = bool(supabase_ok)
+        else:
+            supabase_ok = _READINESS_CACHE.get("ok", True)
+
         if not supabase_ok:
             return JSONResponse(status_code=503, content={"status": "not_ready", "database": "unavailable"})
 
     return {"status": "ready", "database": "available"}
 
 # --- Claim Verification Endpoint (FR-C1 to FR-C5, FR-A9, FR-A10, FR-P4) ---
-@app.post("/api/verify")
-@app.post("/api/v1/verify/claim")
+@api_router.post("/verify")
+@api_router.post("/verify/claim")
 async def verify_claims(
     body: TextRequest,
     req: Request,
@@ -467,7 +442,7 @@ async def verify_claims(
     return {"claims": verified_claims}
 
 # --- User-triggered page summarization (FR-S1 to FR-S9) ---
-@app.post("/api/summarize")
+@api_router.post("/summarize")
 async def summarize_page(
     body: SummaryRequest,
     req: Request,
@@ -526,12 +501,17 @@ async def summarize_page(
         result["truncated"] = truncated
 
     response: Dict[str, Any] = {**result, "url": source_url}
+
+    # Record usage for authenticated user (FR-A9)
+    if user:
+        await supabase_client.record_summary(user)
+
     logger.info(f"Summary completed | user_auth={bool(user)} | source={result['source']} | truncated={truncated}")
     return response
 
 # --- URL Scanner Endpoint (FR-U1 to FR-U5, FR-A9, FR-P4) ---
-@app.post("/api/scan")
-@app.post("/api/v1/scan/url")
+@api_router.post("/scan")
+@api_router.post("/scan/url")
 async def scan_url(
     body: UrlRequest,
     req: Request,
@@ -631,8 +611,7 @@ async def scan_url(
     }
 
 # --- Warning Interstitial Endpoint (FR-U8) ---
-@app.get("/api/interstitial")
-@app.get("/interstitial")
+@api_router.get("/interstitial")
 async def get_interstitial_page(url: Optional[str] = None) -> dict[str, object]:
     target = url or "https://suspicious-example.com"
     return {
@@ -643,11 +622,158 @@ async def get_interstitial_page(url: Optional[str] = None) -> dict[str, object]:
         "can_proceed": True
     }
 
-@app.get("/favicon.ico", include_in_schema=False)
 def favicon():
-    return FileResponse("static/favicon.svg", media_type="image/svg+xml")
+    if os.path.exists("static/favicon.svg"):
+        return FileResponse("static/favicon.svg", media_type="image/svg+xml")
+    return Response(status_code=204)
 
-if os.getenv("ENV", "development").lower() != "production":
-    # Development-only surfaces. Production uses Next.js and packaged extension assets.
-    app.mount("/extension", StaticFiles(directory="extension", html=True), name="extension")
-    app.mount("/", StaticFiles(directory="static", html=True), name="static")
+
+def create_app() -> FastAPI:
+    env = (os.getenv("ENV", "development") or "development").lower()
+    docs_enabled_env = os.getenv("DOCS_ENABLED")
+    if docs_enabled_env is not None:
+        docs_enabled = docs_enabled_env.lower() in ("true", "1", "yes")
+    else:
+        docs_enabled = env != "production"
+
+    application = FastAPI(
+        title="TrustLens AI API",
+        description="Browser-based factual claim verification and malicious URL scanner API",
+        version="1.1.0",
+        lifespan=lifespan,
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
+    )
+
+    allowed = get_allowed_origins()
+
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed,
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Authorization", "Content-Type", "Accept-Profile", "Content-Profile"],
+    )
+
+    @application.middleware("http")
+    async def add_request_id(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
+        request.state.request_id = request_id
+        client_ip = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "127.0.0.1")
+        request.state.client_ip = client_ip
+
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+
+        # Security headers (API-07, SEC-07, SEC-08)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+
+        # Authenticated requests must never be cached by shared or client caches
+        if "authorization" in request.headers:
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+
+        # Deprecation notice for legacy routes
+        if request.url.path.startswith("/api/") and not request.url.path.startswith("/api/v1/"):
+            response.headers["Deprecation"] = "true"
+        return response
+
+    @application.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        request_id = request.headers.get("x-request-id") or getattr(request.state, "request_id", str(uuid.uuid4()))
+        detail = exc.detail
+        headers = {"X-Request-ID": request_id, **(exc.headers or {})}
+        headers["X-Content-Type-Options"] = "nosniff"
+        headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return JSONResponse(
+            status_code=exc.status_code,
+            headers=headers,
+            content={
+                "error": {
+                    "code": exc.status_code,
+                    "message": detail,
+                    "request_id": request_id,
+                }
+            },
+        )
+
+    @application.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+        request_id = request.headers.get("x-request-id") or getattr(request.state, "request_id", str(uuid.uuid4()))
+        headers = {
+            "X-Request-ID": request_id,
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+        }
+        return JSONResponse(
+            status_code=422,
+            headers=headers,
+            content={
+                "error": {
+                    "code": 422,
+                    "message": "Invalid request payload.",
+                    "details": exc.errors(),
+                    "request_id": request_id,
+                }
+            },
+        )
+
+    @application.exception_handler(Exception)
+    async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        request_id = request.headers.get("x-request-id") or getattr(request.state, "request_id", str(uuid.uuid4()))
+        logger.exception("Unhandled server error: %s (request_id=%s)", type(exc).__name__, request_id)
+        headers = {
+            "X-Request-ID": request_id,
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+        }
+        return JSONResponse(
+            status_code=500,
+            headers=headers,
+            content={
+                "error": {
+                    "code": 500,
+                    "message": "An internal server error occurred.",
+                    "request_id": request_id,
+                }
+            },
+        )
+
+    # Root system probes and utilities
+    @application.get("/healthz")
+    async def _healthz() -> Dict[str, Any]:
+        return {"status": "ok", "service": "trustlens-api"}
+
+    @application.get("/readyz", response_model=None)
+    async def _readyz() -> Dict[str, Any] | JSONResponse:
+        return await readiness()
+
+    @application.get("/interstitial")
+    async def _interstitial(url: Optional[str] = None) -> dict[str, object]:
+        return await get_interstitial_page(url)
+
+    @application.get("/favicon.ico", include_in_schema=False)
+    def _favicon():
+        return favicon()
+
+    # Mount unified router under canonical /api/v1 and legacy /api
+    application.include_router(api_router, prefix="/api/v1")
+    application.include_router(api_router, prefix="/api")
+
+    # Static mounts are disabled in production mode (API-only gateway)
+    if env != "production":
+        if os.path.exists("extension"):
+            application.mount("/extension", StaticFiles(directory="extension", html=True), name="extension")
+        if os.path.exists("static"):
+            application.mount("/", StaticFiles(directory="static", html=True), name="static")
+
+    return application
+
+
+app = create_app()
+

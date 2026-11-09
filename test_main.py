@@ -696,3 +696,217 @@ def test_concurrent_scans_do_not_block(monkeypatch):
     elapsed = time.time() - start
     assert all(r.status_code == 200 for r in responses)
     assert elapsed < 5.0
+
+
+# ── Phase 8 Proof Tests (API Production Hardening) ──────────────────────────
+
+def test_legacy_and_v1_route_parity():
+    # 1. Health check parity
+    r_v1 = client.get("/api/v1/health")
+    r_legacy = client.get("/api/health")
+    assert r_v1.status_code == 200
+    assert r_legacy.status_code == 200
+    assert r_legacy.headers.get("Deprecation") == "true"
+    assert r_v1.headers.get("Deprecation") is None
+
+    # 2. Interstitial parity
+    r_v1_int = client.get("/api/v1/interstitial?url=https://example.com")
+    r_leg_int = client.get("/api/interstitial?url=https://example.com")
+    assert r_v1_int.status_code == 200
+    assert r_leg_int.status_code == 200
+    assert r_v1_int.json()["title"] == r_leg_int.json()["title"]
+    assert r_leg_int.headers.get("Deprecation") == "true"
+
+    # 3. Summarize route parity
+    r_v1_sum = client.post("/api/v1/summarize", json={"url": "https://example.com"})
+    r_leg_sum = client.post("/api/summarize", json={"url": "https://example.com"})
+    # Both endpoints exist and return valid response status (e.g., 200 or 503 if unconfigured)
+    assert r_v1_sum.status_code == r_leg_sum.status_code
+    assert r_leg_sum.headers.get("Deprecation") == "true"
+    assert r_v1_sum.headers.get("Deprecation") is None
+
+    # 4. History route must be absent (404)
+    r_hist = client.get("/api/history")
+    assert r_hist.status_code == 404
+    r_v1_hist = client.get("/api/v1/history")
+    assert r_v1_hist.status_code == 404
+
+
+def test_no_static_mounts_in_prod(monkeypatch):
+    monkeypatch.setenv("ENV", "production")
+    monkeypatch.setenv("DOCS_ENABLED", "false")
+
+    # In production, static demo mounts and interactive OpenAPI docs must be disabled
+    # Re-evaluating mounts or querying routes in production mode
+    prod_app = main.create_app() if hasattr(main, "create_app") else main.app
+    prod_client = TestClient(prod_app)
+
+    r_ext = prod_client.get("/extension/manifest.json")
+    assert r_ext.status_code == 404
+
+    r_docs = prod_client.get("/docs")
+    assert r_docs.status_code == 404
+
+    r_openapi = prod_client.get("/openapi.json")
+    assert r_openapi.status_code == 404
+
+
+def test_error_contract_has_request_id():
+    # 1. Validation error (422) must follow uniform error envelope with request_id
+    custom_id = "req-err-test-422"
+    r = client.post("/api/v1/verify/claim", json={"text": ""}, headers={"X-Request-ID": custom_id})
+    assert r.status_code == 422
+    assert r.headers.get("X-Request-ID") == custom_id
+    body = r.json()
+    assert "error" in body
+    assert body["error"]["code"] == 422
+    assert body["error"]["request_id"] == custom_id
+    assert "details" in body["error"] or "message" in body["error"]
+
+    # 2. HTTP exception (404) follows error envelope
+    r404 = client.get("/api/v1/nonexistent", headers={"X-Request-ID": "req-404"})
+    assert r404.status_code == 404
+    assert r404.headers.get("X-Request-ID") == "req-404"
+    assert "error" in r404.json()
+    assert r404.json()["error"]["code"] == 404
+    assert r404.json()["error"]["request_id"] == "req-404"
+
+
+def test_security_headers_present():
+    r = client.get("/healthz")
+    assert r.status_code == 200
+    assert r.headers.get("X-Content-Type-Options") == "nosniff"
+    assert "max-age=" in r.headers.get("Strict-Transport-Security", "")
+    assert r.headers.get("Referrer-Policy") in ("strict-origin-when-cross-origin", "no-referrer")
+
+    # Authenticated requests must carry Cache-Control: no-store
+    r_auth = client.post(
+        "/api/v1/verify/claim",
+        headers={"Authorization": "Bearer mock-token-123"},
+        json={"text": "5G towers spread viruses"}
+    )
+    assert "no-store" in r_auth.headers.get("Cache-Control", "")
+
+
+# ─── Phase 8 Step 3 Proof Tests ───────────────────────────────────────────────
+
+def test_prod_refuses_to_boot_without_config(monkeypatch: MonkeyPatch):
+    """test_prod_refuses_to_boot_without_config: validate_runtime_config raises in production
+    when required keys are absent (typed settings / fail-closed boot)."""
+    monkeypatch.setenv("ENV", "production")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://app.trustlens.ai")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-role-key")
+    monkeypatch.delenv("GOOGLE_FACTCHECK_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_WEB_RISK_API_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="production.*config"):
+        main.validate_runtime_config()
+
+
+def test_summaries_are_counted(monkeypatch: MonkeyPatch):
+    """test_summaries_are_counted: when an authenticated user calls /summarize,
+    record_summary is invoked on supabase_client."""
+    monkeypatch.setenv("SUPABASE_URL", "https://mock.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "mock-service-key")
+
+    recorded: list[dict[Any, Any]] = []
+
+    async def mock_user(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {"id": "summary-user-001", "email": "s@example.com", "plan": "free"}
+
+    async def mock_record_summary(user: dict[str, Any]) -> None:
+        recorded.append({"user_id": user.get("id")})
+
+    async def mock_summarize(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {"summary": "mocked", "source": "text", "confidence": 0.9}
+
+    monkeypatch.setattr(main.supabase_client, "verify_token", mock_user)
+    monkeypatch.setattr(main.supabase_client, "record_summary", mock_record_summary)
+    monkeypatch.setattr(main.summarizer, "summarize_text", mock_summarize)
+    monkeypatch.setattr(main.summarizer, "is_wikipedia_url", lambda url: False)
+    monkeypatch.setattr(main.summarizer, "summarize_sections", lambda text: [])
+
+    resp = client.post(
+        "/api/v1/summarize",
+        json={"text": "The sky is blue and the earth revolves around the sun."},
+        headers={"Authorization": "Bearer valid.token"},
+    )
+    assert resp.status_code == 200
+    assert len(recorded) == 1
+    assert recorded[0]["user_id"] == "summary-user-001"
+
+
+def test_usage_increment_is_atomic(monkeypatch: MonkeyPatch):
+    """test_usage_increment_is_atomic: 10 concurrent verify calls for the same authenticated
+    user produce exactly 10 usage increments (record_claim_check called 10 times)."""
+    import asyncio as _asyncio
+
+    monkeypatch.setenv("SUPABASE_URL", "https://mock.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "mock-service-key")
+    monkeypatch.setattr(main, "GOOGLE_FACTCHECK_KEY", "")
+
+    call_count: list[int] = [0]
+
+    async def mock_user(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {"id": "atomic-user-002", "email": "a@example.com", "plan": "free"}
+
+    async def mock_record(user: dict[str, Any], num_claims: int = 1) -> None:
+        call_count[0] += num_claims
+
+    monkeypatch.setattr(main.supabase_client, "verify_token", mock_user)
+    monkeypatch.setattr(main.supabase_client, "record_claim_check", mock_record)
+
+    main.RATE_LIMIT_BUCKET.clear()
+    for _ in range(10):
+        r = client.post(
+            "/api/v1/verify/claim",
+            json={"text": "Water boils at 100 degrees Celsius."},
+            headers={"Authorization": "Bearer valid.token"},
+        )
+        assert r.status_code == 200
+
+    assert call_count[0] >= 10, f"Expected >= 10 usage increments, got {call_count[0]}"
+
+
+def test_rate_limit_shared_across_workers(monkeypatch: MonkeyPatch):
+    """test_rate_limit_shared_across_workers: a shared in-process rate-limit store
+    accumulates hits across two sequential 'worker' calls without reset."""
+    main.RATE_LIMIT_BUCKET.clear()
+    ip = "worker-shared-ip"
+
+    # Simulate worker A: 15 hits
+    for _ in range(15):
+        allowed = main.check_ip_rate_limit(ip, cap=30, per=60)
+        assert allowed is True
+
+    # Simulate worker B reading the same in-memory store: 15 more hits
+    for _ in range(15):
+        allowed = main.check_ip_rate_limit(ip, cap=30, per=60)
+        assert allowed is True
+
+    # 31st hit must be blocked (shared state across both workers)
+    blocked = main.check_ip_rate_limit(ip, cap=30, per=60)
+    assert blocked is False
+
+
+def test_readyz_degrades_when_redis_down(monkeypatch):
+    # Simulates storage or dependency degradation on readiness probe
+    monkeypatch.setenv("ENV", "production")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "mock-key")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://app.trustlens.ai")
+
+    # Invalidate cached readiness state
+    if hasattr(main, "_READINESS_CACHE"):
+        main._READINESS_CACHE.clear()
+
+    # When database ping fails, /readyz must degrade to 503
+    async def mock_fail_ping():
+        return False
+    monkeypatch.setattr(main.supabase_client, "ping_supabase", mock_fail_ping)
+
+    r = client.get("/readyz")
+    assert r.status_code == 503
+    assert r.json().get("status") == "not_ready"

@@ -6,6 +6,9 @@ __pycache__/
 .vscode/
 *.db
 trustlens.db
+node_modules/
+my-app/node_modules/
+my-app/.next/
 my-vibe-app/node_modules/
 my-vibe-app/.next/
 *.pem
