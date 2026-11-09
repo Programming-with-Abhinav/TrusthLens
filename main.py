@@ -91,6 +91,12 @@ def validate_runtime_config() -> None:
         missing = ", ".join(required)
         raise RuntimeError(f"production config missing required values: {missing}")
 
+# Free-tier daily budget guards (Task 8.15 / TL-050): protect upstream API quotas
+# Google Fact Check free tier: ~10,000 requests/day
+DAILY_FREE_CLAIM_LIMIT: int = int(os.getenv("DAILY_FREE_CLAIM_LIMIT", "50"))
+DAILY_FREE_SCAN_LIMIT: int = int(os.getenv("DAILY_FREE_SCAN_LIMIT", "50"))
+DAILY_FREE_SUMMARY_LIMIT: int = int(os.getenv("DAILY_FREE_SUMMARY_LIMIT", "20"))
+
 # In-memory IP rate limiter for anonymous access
 RATE_LIMIT_BUCKET: Dict[str, list[float]] = {}
 
@@ -495,6 +501,11 @@ async def summarize_page(
         result["truncated"] = truncated
 
     response: Dict[str, Any] = {**result, "url": source_url}
+
+    # Record usage for authenticated user (FR-A9)
+    if user:
+        await supabase_client.record_summary(user)
+
     logger.info(f"Summary completed | user_auth={bool(user)} | source={result['source']} | truncated={truncated}")
     return response
 

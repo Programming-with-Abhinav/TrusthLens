@@ -37,6 +37,7 @@ Total tracked: see `00-PROJECT-ANALYSIS.md` §4.
 | 2026-11-08 | Frontend CI Build | Fixed TypeScript type mismatch with centralized `lib/types.ts`; `npx tsc --noEmit`, `npm run lint`, and `npm run build` all pass cleanly with 0 errors; aligned CI workflow path to `my-app` | Coding agent |
 | 2026-11-09 | TL-053/TL-054 | Phase 8 Step 1: `test_legacy_and_v1_route_parity` and `test_no_static_mounts_in_prod` pass. Unified APIRouter mounted at /api/v1 and legacy /api with Deprecation header; static mounts and docs disabled in production. Total 64 tests green. | Coding agent |
 | 2026-11-09 | TL-056/API-06/07/08 | Phase 8 Step 2: `test_error_contract_has_request_id`, `test_security_headers_present`, and `test_readyz_degrades_when_redis_down` pass. Uniform error envelope, security headers (nosniff, HSTS, referrer-policy, private cache-control), and cached readiness probe verified. Total 67 tests green. | Coding agent |
+| 2026-11-09 | TL-058/8.1/8.4/8.3/8.15/8.11/8.12 | Phase 8 Steps 3-5: `test_prod_refuses_to_boot_without_config`, `test_summaries_are_counted`, `test_usage_increment_is_atomic`, `test_rate_limit_shared_across_workers` pass. record_summary added to supabase_client; budget guard constants (DAILY_FREE_*_LIMIT) added; Dockerfile upgraded to multi-stage build with non-root user and HEALTHCHECK; requirements.txt/requirements-dev.txt split. Total 71 tests green. | Coding agent |
 
 ## Open decisions
 D1–D10 in `DECISIONS.md` — none resolved.

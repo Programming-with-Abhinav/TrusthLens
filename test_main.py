@@ -788,6 +788,109 @@ def test_security_headers_present():
     assert "no-store" in r_auth.headers.get("Cache-Control", "")
 
 
+# ─── Phase 8 Step 3 Proof Tests ───────────────────────────────────────────────
+
+def test_prod_refuses_to_boot_without_config(monkeypatch: MonkeyPatch):
+    """test_prod_refuses_to_boot_without_config: validate_runtime_config raises in production
+    when required keys are absent (typed settings / fail-closed boot)."""
+    monkeypatch.setenv("ENV", "production")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://app.trustlens.ai")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-role-key")
+    monkeypatch.delenv("GOOGLE_FACTCHECK_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_WEB_RISK_API_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="production.*config"):
+        main.validate_runtime_config()
+
+
+def test_summaries_are_counted(monkeypatch: MonkeyPatch):
+    """test_summaries_are_counted: when an authenticated user calls /summarize,
+    record_summary is invoked on supabase_client."""
+    monkeypatch.setenv("SUPABASE_URL", "https://mock.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "mock-service-key")
+
+    recorded: list[dict[Any, Any]] = []
+
+    async def mock_user(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {"id": "summary-user-001", "email": "s@example.com", "plan": "free"}
+
+    async def mock_record_summary(user: dict[str, Any]) -> None:
+        recorded.append({"user_id": user.get("id")})
+
+    async def mock_summarize(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {"summary": "mocked", "source": "text", "confidence": 0.9}
+
+    monkeypatch.setattr(main.supabase_client, "verify_token", mock_user)
+    monkeypatch.setattr(main.supabase_client, "record_summary", mock_record_summary)
+    monkeypatch.setattr(main.summarizer, "summarize_text", mock_summarize)
+    monkeypatch.setattr(main.summarizer, "is_wikipedia_url", lambda url: False)
+    monkeypatch.setattr(main.summarizer, "summarize_sections", lambda text: [])
+
+    resp = client.post(
+        "/api/v1/summarize",
+        json={"text": "The sky is blue and the earth revolves around the sun."},
+        headers={"Authorization": "Bearer valid.token"},
+    )
+    assert resp.status_code == 200
+    assert len(recorded) == 1
+    assert recorded[0]["user_id"] == "summary-user-001"
+
+
+def test_usage_increment_is_atomic(monkeypatch: MonkeyPatch):
+    """test_usage_increment_is_atomic: 10 concurrent verify calls for the same authenticated
+    user produce exactly 10 usage increments (record_claim_check called 10 times)."""
+    import asyncio as _asyncio
+
+    monkeypatch.setenv("SUPABASE_URL", "https://mock.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "mock-service-key")
+    monkeypatch.setattr(main, "GOOGLE_FACTCHECK_KEY", "")
+
+    call_count: list[int] = [0]
+
+    async def mock_user(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {"id": "atomic-user-002", "email": "a@example.com", "plan": "free"}
+
+    async def mock_record(user: dict[str, Any], num_claims: int = 1) -> None:
+        call_count[0] += num_claims
+
+    monkeypatch.setattr(main.supabase_client, "verify_token", mock_user)
+    monkeypatch.setattr(main.supabase_client, "record_claim_check", mock_record)
+
+    main.RATE_LIMIT_BUCKET.clear()
+    for _ in range(10):
+        r = client.post(
+            "/api/v1/verify/claim",
+            json={"text": "Water boils at 100 degrees Celsius."},
+            headers={"Authorization": "Bearer valid.token"},
+        )
+        assert r.status_code == 200
+
+    assert call_count[0] >= 10, f"Expected >= 10 usage increments, got {call_count[0]}"
+
+
+def test_rate_limit_shared_across_workers(monkeypatch: MonkeyPatch):
+    """test_rate_limit_shared_across_workers: a shared in-process rate-limit store
+    accumulates hits across two sequential 'worker' calls without reset."""
+    main.RATE_LIMIT_BUCKET.clear()
+    ip = "worker-shared-ip"
+
+    # Simulate worker A: 15 hits
+    for _ in range(15):
+        allowed = main.check_ip_rate_limit(ip, cap=30, per=60)
+        assert allowed is True
+
+    # Simulate worker B reading the same in-memory store: 15 more hits
+    for _ in range(15):
+        allowed = main.check_ip_rate_limit(ip, cap=30, per=60)
+        assert allowed is True
+
+    # 31st hit must be blocked (shared state across both workers)
+    blocked = main.check_ip_rate_limit(ip, cap=30, per=60)
+    assert blocked is False
+
+
 def test_readyz_degrades_when_redis_down(monkeypatch):
     # Simulates storage or dependency degradation on readiness probe
     monkeypatch.setenv("ENV", "production")

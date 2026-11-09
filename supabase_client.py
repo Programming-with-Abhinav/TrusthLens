@@ -147,6 +147,31 @@ async def record_claim_check(user: dict[str, object], num_claims: int = 1) -> No
             pass
 
 
+async def record_summary(user: dict[str, object]) -> None:
+    """Increments summary count for authenticated user (FR-A9)."""
+    if not user:
+        return
+
+    user_id = str(user["id"])
+    day = datetime.date.today().isoformat()
+
+    if is_configured():
+        supabase_url = get_supabase_url()
+        try:
+            async with httpx.AsyncClient(timeout=4.0) as client:
+                await client.post(
+                    f"{supabase_url}/rest/v1/rpc/increment_usage",
+                    headers=get_headers(),
+                    json={
+                        "target_user_id": user_id,
+                        "usage_type": "summary",
+                        "usage_day": day,
+                    },
+                )
+        except Exception:
+            pass
+
+
 async def record_url_scan(user: dict[str, object]) -> None:
     """Increments URL scan count for authenticated user."""
     if not user:

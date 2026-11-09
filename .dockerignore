@@ -13,3 +13,9 @@ __pycache__/
 .vscode/
 planning/
 PLANNING_README.md
+# Dev-only files — keep image lean (Task 8.11)
+test_*.py
+audits/
+my-app/
+scripts/
+*.md
