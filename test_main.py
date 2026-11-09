@@ -696,3 +696,56 @@ def test_concurrent_scans_do_not_block(monkeypatch):
     elapsed = time.time() - start
     assert all(r.status_code == 200 for r in responses)
     assert elapsed < 5.0
+
+
+# ── Phase 8 Proof Tests (API Production Hardening) ──────────────────────────
+
+def test_legacy_and_v1_route_parity():
+    # 1. Health check parity
+    r_v1 = client.get("/api/v1/health")
+    r_legacy = client.get("/api/health")
+    assert r_v1.status_code == 200
+    assert r_legacy.status_code == 200
+    assert r_legacy.headers.get("Deprecation") == "true"
+    assert r_v1.headers.get("Deprecation") is None
+
+    # 2. Interstitial parity
+    r_v1_int = client.get("/api/v1/interstitial?url=https://example.com")
+    r_leg_int = client.get("/api/interstitial?url=https://example.com")
+    assert r_v1_int.status_code == 200
+    assert r_leg_int.status_code == 200
+    assert r_v1_int.json()["title"] == r_leg_int.json()["title"]
+    assert r_leg_int.headers.get("Deprecation") == "true"
+
+    # 3. Summarize route parity
+    r_v1_sum = client.post("/api/v1/summarize", json={"url": "https://example.com"})
+    r_leg_sum = client.post("/api/summarize", json={"url": "https://example.com"})
+    # Both endpoints exist and return valid response status (e.g., 200 or 503 if unconfigured)
+    assert r_v1_sum.status_code == r_leg_sum.status_code
+    assert r_leg_sum.headers.get("Deprecation") == "true"
+    assert r_v1_sum.headers.get("Deprecation") is None
+
+    # 4. History route must be absent (404)
+    r_hist = client.get("/api/history")
+    assert r_hist.status_code == 404
+    r_v1_hist = client.get("/api/v1/history")
+    assert r_v1_hist.status_code == 404
+
+
+def test_no_static_mounts_in_prod(monkeypatch):
+    monkeypatch.setenv("ENV", "production")
+    monkeypatch.setenv("DOCS_ENABLED", "false")
+
+    # In production, static demo mounts and interactive OpenAPI docs must be disabled
+    # Re-evaluating mounts or querying routes in production mode
+    prod_app = main.create_app() if hasattr(main, "create_app") else main.app
+    prod_client = TestClient(prod_app)
+
+    r_ext = prod_client.get("/extension/manifest.json")
+    assert r_ext.status_code == 404
+
+    r_docs = prod_client.get("/docs")
+    assert r_docs.status_code == 404
+
+    r_openapi = prod_client.get("/openapi.json")
+    assert r_openapi.status_code == 404
