@@ -23,3 +23,8 @@ http://localhost:5500/docs
 ```
 
 This project is ready for local development and launch checks.
+## 3) Open the fast backend 
+.\.venv\Scripts\python.exe -m uvicorn main:app --reload --port 5500
+
+## 4) open the frontend run 
+npm dev run 
